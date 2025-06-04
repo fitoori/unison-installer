@@ -2,7 +2,7 @@
 
 ###############################################################################
 #                            install_unison_stack.sh                          #
-#                                      v1.0                                   #
+#                                      v1.1.1                                 #
 ###############################################################################
 # Production-ready installer for:
 #   • VCS tools (git, hg, darcs)
@@ -163,26 +163,28 @@ get_ocaml_ver() {
   echo "$available" | sort -V | tail -n1
 }
 
-if ! sudo -u "$REAL_USER" bash -lc "opam switch show" &>/dev/null; then
+# Does a switch called “default” already exist?
+if sudo -u "$REAL_USER" bash -lc "opam switch list --short" | grep -qx default; then
+  log "OPAM switch 'default' already exists – selecting it."
+  sudo -u "$REAL_USER" bash -lc "opam switch set default"
+else
   OCAML_VER=$(get_ocaml_ver)
   [[ -z "$OCAML_VER" ]] && fatal "No suitable OCaml compiler found."
   log "Creating default OPAM switch with $OCAML_VER…"
   sudo -u "$REAL_USER" bash -lc "opam switch create default $OCAML_VER -y"
-else
-  CURRENT_SWITCH=$(sudo -u "$REAL_USER" bash -lc "opam switch show")
-  log "Active OPAM switch: $CURRENT_SWITCH"
 fi
 
 # ──────────────────────────────────────────────────────────────────────────── #
 # 8. Build & install Unison from source
 # ──────────────────────────────────────────────────────────────────────────── #
+# Create temp dir as the real user so ownership is correct
+UNISON_BUILD_DIR=$(sudo -u "$REAL_USER" mktemp -d /tmp/unison-build-XXXXXX)
+cleanup() { rm -rf "$UNISON_BUILD_DIR"; }
+trap cleanup EXIT
+
 if [[ -x "/usr/local/bin/unison" ]]; then
   log "Unison already installed – skipping build."
 else
-  UNISON_BUILD_DIR="$(mktemp -d /tmp/unison-build-XXXXXX)"
-  cleanup() { rm -rf "$UNISON_BUILD_DIR"; }
-  trap cleanup EXIT
-
   log "Cloning Unison…"
   git clone --depth=1 https://github.com/bcpierce00/unison.git "$UNISON_BUILD_DIR"
 
@@ -204,5 +206,19 @@ else
   fi
 fi
 
-log "✅ All done. Verify with:  unison -version"
+# ──────────────────────────────────────────────────────────────────────────── #
+# 9. Final sanity check: does Unison actually run?
+# ──────────────────────────────────────────────────────────────────────────── #
+verify_unison() {
+  if unison --version >/dev/null 2>&1; then
+    # Capture version string for the log
+    local ver
+    ver=$(unison --version 2>&1 | head -n1)
+    log "✅ Installation successful – $ver"
+  else
+    fatal "Unison binary not found or failed to execute."
+  fi
+}
+
+verify_unison
 exit 0
