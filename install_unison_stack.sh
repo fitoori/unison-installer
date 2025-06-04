@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-
 ###############################################################################
 #                            install_unison_stack.sh                          #
-#                                      v1.1.6                                 #
+#                                    v1.2.0                                   #
 ###############################################################################
 # Production-ready installer for:
 #   • VCS tools (git, hg, darcs)
@@ -12,9 +11,10 @@
 #
 # Target: Debian / Raspberry Pi OS
 # Fails fast: exits immediately on any error with a helpful message.
+###############################################################################
 
 set -Eeuo pipefail
-shopt -s inherit_errexit             # make ERR trap propagate into subshells
+shopt -s inherit_errexit
 IFS=$'\n\t'
 
 log()   { printf '%s [INFO]  %s\n'  "$(date +'%F %T')" "$*"; }
@@ -22,22 +22,19 @@ fatal() { printf '%s [FATAL] %s\n' "$(date +'%F %T')" "$*" >&2; exit 1; }
 trap 'rc=$?; fatal "cmd: \"$BASH_COMMAND\" | line: $LINENO | exit: $rc"' ERR
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# Configuration
+# Configuration                                                               #
 # ──────────────────────────────────────────────────────────────────────────── #
-MIN_RAM_MB=2048                 # skip swap if we have this much RAM
+MIN_RAM_MB=2048                   # swap threshold
 SWAP_FILE="/swapfile"
-SWAP_SIZE="2G"                  # accepts “NNM” or “NNG”
+SWAP_SIZE="2G"                    # accepts “NNM” or “NNG”
 
-# Convert $SWAP_SIZE → MiB for dd fallback
 swap_size_mib() {
   [[ "$SWAP_SIZE" =~ ^([0-9]+)([GgMm])$ ]] \
     || fatal "Unsupported SWAP_SIZE format '$SWAP_SIZE'"
-
   local n=${BASH_REMATCH[1]} unit=${BASH_REMATCH[2]}
   [[ $unit =~ [Gg] ]] && echo $(( n * 1024 )) || echo "$n"
 }
 
-# Must run as root
 [[ $(id -u) -eq 0 ]] || fatal "Run as root (with sudo)."
 
 REAL_USER="${SUDO_USER:-$USER}"
@@ -47,22 +44,20 @@ log "Real user      : $REAL_USER"
 log "User home      : $USER_HOME"
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# 1. Detect total RAM
+# 1. Detect total RAM                                                         #
 # ──────────────────────────────────────────────────────────────────────────── #
-get_total_ram_mb() {
-  grep MemTotal /proc/meminfo | awk '{print int($2/1024)}'
-}
+get_total_ram_mb() { grep MemTotal /proc/meminfo | awk '{print int($2/1024)}'; }
 
-if [[ -f /proc/device-tree/model ]]; then
+[[ -f /proc/device-tree/model ]] && {
   DEVICE_MODEL=$(tr -d '\0' </proc/device-tree/model)
   log "Device model   : $DEVICE_MODEL"
-fi
+}
 
 RAM_MB=$(get_total_ram_mb)
 log "Detected RAM   : ${RAM_MB} MB"
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# 2. Create swap if needed
+# 2. Create swap if needed                                                    #
 # ──────────────────────────────────────────────────────────────────────────── #
 if (( RAM_MB < MIN_RAM_MB )); then
   if swapon --show | grep -q "^$SWAP_FILE"; then
@@ -70,13 +65,9 @@ if (( RAM_MB < MIN_RAM_MB )); then
   else
     log "Creating $SWAP_SIZE swap at $SWAP_FILE (RAM < ${MIN_RAM_MB} MB)"
     [[ -f "$SWAP_FILE" ]] && { swapoff "$SWAP_FILE" || true; rm -f "$SWAP_FILE"; }
-
     fallocate -l "$SWAP_SIZE" "$SWAP_FILE" || \
       dd if=/dev/zero of="$SWAP_FILE" bs=1M count="$(swap_size_mib)"
-
-    chmod 600 "$SWAP_FILE"
-    mkswap "$SWAP_FILE"
-    swapon "$SWAP_FILE"
+    chmod 600 "$SWAP_FILE"; mkswap "$SWAP_FILE"; swapon "$SWAP_FILE"
     grep -qxF "$SWAP_FILE none swap sw 0 0" /etc/fstab || \
       echo "$SWAP_FILE none swap sw 0 0" >> /etc/fstab
     log "Swap enabled."
@@ -88,50 +79,36 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# Wi-Fi helper – unblock rfkill & set country automatically
+# Wi-Fi helper – unblock rfkill & set country automatically                   #
 # ──────────────────────────────────────────────────────────────────────────── #
 ensure_wifi_ok() {
-  # Check if any wireless iface is soft-blocked
   if rfkill list wifi 2>/dev/null | grep -qi 'Soft blocked: yes'; then
-    log "Wi-Fi appears to be rfkill-blocked – attempting to fix."
-
-    # Try to detect country (falls back to US)
+    log "Wi-Fi appears rfkill-blocked – attempting to fix."
     local cc
     cc=$(curl -fsSL --max-time 4 https://ipinfo.io/country 2>/dev/null | tr -d '\r\n')
     [[ ${#cc} -ne 2 ]] && { log "Geolocation failed; defaulting country to US"; cc="US"; }
-
     log "Setting Wi-Fi country to $cc and unblocking radio."
-
-    # raspi-config non-interactive country setter (safe on Debian, no-op if absent)
     if command -v raspi-config >/dev/null 2>&1; then
       raspi-config nonint do_wifi_country "$cc" || true
     else
-      # Generic fallback: write to wpa_supplicant.conf if present
-      sed -i.bak -e "s/^country=.*/country=$cc/" /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null || true
+      sed -i.bak -e "s/^country=.*/country=$cc/" \
+        /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null || true
     fi
-
     rfkill unblock wifi || true
     log "Wi-Fi rfkill unblock attempted."
   else
     log "Wi-Fi not rfkill-blocked – nothing to do."
   fi
 }
-
-# Call it early so networking works for package installs / git clones
-ensure_wifi_ok
+ensure_wifi_ok   # need network for apt/git
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# 3. Install required packages (single apt transaction)
+# 3. Install required packages                                                #
 # ──────────────────────────────────────────────────────────────────────────── #
 declare -A PKG=(
-  [git]=git
-  [hg]=mercurial
-  [darcs]=darcs
-  [gcc]=gcc
-  [make]=build-essential
-  [curl]=curl
-  [unzip]=unzip
-  [bwrap]=bubblewrap
+  [git]=git          [hg]=mercurial   [darcs]=darcs
+  [gcc]=gcc          [make]=build-essential
+  [curl]=curl        [unzip]=unzip    [bwrap]=bubblewrap
 )
 
 missing_pkgs=()
@@ -151,40 +128,46 @@ if ((${#missing_pkgs[@]})); then
 fi
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# 4. OPAM – install if absent
+# 4. OPAM – non-interactive install (pseudo-TTY)                              #
 # ──────────────────────────────────────────────────────────────────────────── #
 if ! command -v opam &>/dev/null; then
   log "Installing OPAM…"
-  sudo -u "$REAL_USER" bash -lc "curl -fsSL https://opam.ocaml.org/install.sh | sh"
+  sudo -u "$REAL_USER" bash -lc '
+    set -e
+    tmp=$(mktemp /tmp/opam-install-XXXXXX.sh)
+    curl -fsSL https://opam.ocaml.org/install.sh -o "$tmp"
+    chmod +x "$tmp"
+    # run under a tiny pseudo-tty; feed newline to accept default /usr/local/bin
+    script -qfc "yes \"\" | \"$tmp\" --tty" /dev/null
+  '
 else
   log "OPAM already installed."
 fi
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# 5. OPAM init (user scope)
+# 5. OPAM init (user scope)                                                   #
 # ──────────────────────────────────────────────────────────────────────────── #
 if [[ ! -d "$USER_HOME/.opam" ]]; then
   log "Initializing OPAM for $REAL_USER…"
-  sudo -u "$REAL_USER" bash -lc "opam init -y"
+  sudo -u "$REAL_USER" bash -lc "opam init -y --disable-sandboxing"
 else
   log "OPAM already initialised."
 fi
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# 6. OPAM update
+# 6. OPAM update                                                              #
 # ──────────────────────────────────────────────────────────────────────────── #
 log "Updating OPAM package index…"
 sudo -u "$REAL_USER" bash -lc "eval \$(opam env) && opam update -y"
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# 7. Ensure a practical OCaml switch (≥ 4.08)
+# 7. Ensure a practical OCaml switch (≥ 4.08)                                 #
 # ──────────────────────────────────────────────────────────────────────────── #
 PREFERRED_VERSIONS=(
   "ocaml-base-compiler.4.14.2"
   "ocaml-base-compiler.4.14.1"
   "ocaml-base-compiler.4.12.1"
 )
-
 get_ocaml_ver() {
   local available
   available=$(sudo -u "$REAL_USER" bash -lc \
@@ -196,79 +179,66 @@ get_ocaml_ver() {
   echo "$available" | sort -V | tail -n1
 }
 
-# Does a switch called “default” already exist?
 if sudo -u "$REAL_USER" bash -lc "opam switch list --short" | grep -qx default; then
-  log "OPAM switch 'default' already exists – selecting it."
+  log "OPAM switch ‘default’ already exists – selecting it."
   sudo -u "$REAL_USER" bash -lc "opam switch set default"
 else
   OCAML_VER=$(get_ocaml_ver)
   [[ -z "$OCAML_VER" ]] && fatal "No suitable OCaml compiler found."
-  log "Creating default OPAM switch with $OCAML_VER…"
+  log "Creating OPAM switch ‘default’ with $OCAML_VER…"
   sudo -u "$REAL_USER" bash -lc "opam switch create default $OCAML_VER -y"
 fi
 
-# Ensure the compiler is actually installed (ocamlc must resolve)
+# compiler sanity
 log "Verifying OCaml compiler in switch…"
 sudo -u "$REAL_USER" bash -lc '
   eval $(opam env)
-  if ! command -v ocamlc >/dev/null 2>&1; then
-    echo "ocamlc missing – installing compiler packages"
-    opam install -y ocaml-base-compiler dune
-  fi
+  command -v ocamlc >/dev/null 2>&1 || opam install -y ocaml-base-compiler dune
 '
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# 8. Build & install Unison from source
+# 8. Build & install Unison from source                                       #
 # ──────────────────────────────────────────────────────────────────────────── #
-# Create temp dir and ensure real user owns it
-UNISON_BUILD_DIR="$(mktemp -d /tmp/unison-build-XXXXXX)"
+UNISON_BUILD_DIR=$(mktemp -d /tmp/unison-build-XXXXXX)
 chown "$REAL_USER":"$REAL_USER" "$UNISON_BUILD_DIR"
 cleanup() { rm -rf "$UNISON_BUILD_DIR"; }
 trap cleanup EXIT
 
-if [[ -x "/usr/local/bin/unison" ]]; then
+if [[ -x /usr/local/bin/unison ]]; then
   log "Unison already installed – skipping build."
 else
   log "Cloning Unison…"
-  sudo -u "$REAL_USER" \
-       git clone --depth=1 https://github.com/bcpierce00/unison.git "$UNISON_BUILD_DIR"
+  sudo -u "$REAL_USER" git clone --depth=1 https://github.com/bcpierce00/unison.git "$UNISON_BUILD_DIR"
 
-  log "Building Unison (this may take a minute)…"
+  log "Building Unison…"
   sudo -u "$REAL_USER" bash -lc "
-    cd '$UNISON_BUILD_DIR' &&          # user now owns this directory
+    cd '$UNISON_BUILD_DIR' &&
     eval \$(opam env) &&
     make
   "
 
-  [[ -x "$UNISON_BUILD_DIR/src/unison" ]] \
-    || fatal "Unison build failed – binary not found."
+  [[ -x "$UNISON_BUILD_DIR/src/unison" ]] || fatal "Unison binary not found."
 
   log "Installing Unison binary…"
   install -m 0755 "$UNISON_BUILD_DIR/src/unison" /usr/local/bin/unison
 
-  # Install man page if present
   if [[ -f "$UNISON_BUILD_DIR/man/unison.1" ]]; then
     log "Installing Unison man page…"
-    # ensure target dir exists (Debian images sometimes omit it)
     install -d -m 0755 /usr/local/share/man/man1
-    install -m 0644 "$UNISON_BUILD_DIR/man/unison.1" \
-      /usr/local/share/man/man1/unison.1
+    install -m 0644 "$UNISON_BUILD_DIR/man/unison.1" /usr/local/share/man/man1/unison.1
   fi
 fi
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# 9. Final sanity check: does Unison actually run?
+# 9. Final sanity check                                                       #
 # ──────────────────────────────────────────────────────────────────────────── #
 verify_unison() {
   if unison --version >/dev/null 2>&1; then
-    # Capture version string for the log
-    local ver
-    ver=$(unison -version 2>&1 | head -n1)
+    local ver; ver=$(unison -version 2>&1 | head -n1)
     log "✅ Installation successful – $ver"
   else
     fatal "Unison binary not found or failed to execute."
   fi
 }
-
 verify_unison
 exit 0
