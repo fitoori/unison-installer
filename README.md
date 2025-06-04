@@ -1,3 +1,5 @@
+⸻
+
 Overview
 
 install_unison_stack.sh is a one-shot, idempotent installer that turns a fresh Debian / Raspberry Pi OS system into a ready-to-use environment for OCaml + Unison development.
@@ -21,7 +23,7 @@ Prerequisites
 Quick Start
 
 # Get the script
-curl -LO https://example.com/install_unison_stack.sh
+curl -LO https://github.com/fitoori/unison-installer/install_unison_stack.sh
 
 # Make it executable
 chmod +x install_unison_stack.sh
