@@ -2,7 +2,7 @@
 
 ###############################################################################
 #                            install_unison_stack.sh                          #
-#                                      v1.1.2                                 #
+#                                      v1.1.6                                 #
 ###############################################################################
 # Production-ready installer for:
 #   • VCS tools (git, hg, darcs)
@@ -86,6 +86,39 @@ else
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# Wi-Fi helper – unblock rfkill & set country automatically
+# ──────────────────────────────────────────────────────────────────────────── #
+ensure_wifi_ok() {
+  # Check if any wireless iface is soft-blocked
+  if rfkill list wifi 2>/dev/null | grep -qi 'Soft blocked: yes'; then
+    log "Wi-Fi appears to be rfkill-blocked – attempting to fix."
+
+    # Try to detect country (falls back to US)
+    local cc
+    cc=$(curl -fsSL --max-time 4 https://ipinfo.io/country 2>/dev/null | tr -d '\r\n')
+    [[ ${#cc} -ne 2 ]] && { log "Geolocation failed; defaulting country to US"; cc="US"; }
+
+    log "Setting Wi-Fi country to $cc and unblocking radio."
+
+    # raspi-config non-interactive country setter (safe on Debian, no-op if absent)
+    if command -v raspi-config >/dev/null 2>&1; then
+      raspi-config nonint do_wifi_country "$cc" || true
+    else
+      # Generic fallback: write to wpa_supplicant.conf if present
+      sed -i.bak -e "s/^country=.*/country=$cc/" /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null || true
+    fi
+
+    rfkill unblock wifi || true
+    log "Wi-Fi rfkill unblock attempted."
+  else
+    log "Wi-Fi not rfkill-blocked – nothing to do."
+  fi
+}
+
+# Call it early so networking works for package installs / git clones
+ensure_wifi_ok
 
 # ──────────────────────────────────────────────────────────────────────────── #
 # 3. Install required packages (single apt transaction)
@@ -174,6 +207,16 @@ else
   sudo -u "$REAL_USER" bash -lc "opam switch create default $OCAML_VER -y"
 fi
 
+# Ensure the compiler is actually installed (ocamlc must resolve)
+log "Verifying OCaml compiler in switch…"
+sudo -u "$REAL_USER" bash -lc '
+  eval $(opam env)
+  if ! command -v ocamlc >/dev/null 2>&1; then
+    echo "ocamlc missing – installing compiler packages"
+    opam install -y ocaml-base-compiler dune
+  fi
+'
+
 # ──────────────────────────────────────────────────────────────────────────── #
 # 8. Build & install Unison from source
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -187,7 +230,8 @@ if [[ -x "/usr/local/bin/unison" ]]; then
   log "Unison already installed – skipping build."
 else
   log "Cloning Unison…"
-  git clone --depth=1 https://github.com/bcpierce00/unison.git "$UNISON_BUILD_DIR"
+  sudo -u "$REAL_USER" \
+       git clone --depth=1 https://github.com/bcpierce00/unison.git "$UNISON_BUILD_DIR"
 
   log "Building Unison (this may take a minute)…"
   sudo -u "$REAL_USER" bash -lc "
@@ -199,9 +243,14 @@ else
   [[ -x "$UNISON_BUILD_DIR/src/unison" ]] \
     || fatal "Unison build failed – binary not found."
 
-  log "Installing Unison binary + man page…"
+  log "Installing Unison binary…"
   install -m 0755 "$UNISON_BUILD_DIR/src/unison" /usr/local/bin/unison
+
+  # Install man page if present
   if [[ -f "$UNISON_BUILD_DIR/man/unison.1" ]]; then
+    log "Installing Unison man page…"
+    # ensure target dir exists (Debian images sometimes omit it)
+    install -d -m 0755 /usr/local/share/man/man1
     install -m 0644 "$UNISON_BUILD_DIR/man/unison.1" \
       /usr/local/share/man/man1/unison.1
   fi
@@ -214,7 +263,7 @@ verify_unison() {
   if unison --version >/dev/null 2>&1; then
     # Capture version string for the log
     local ver
-    ver=$(unison --version 2>&1 | head -n1)
+    ver=$(unison -version 2>&1 | head -n1)
     log "✅ Installation successful – $ver"
   else
     fatal "Unison binary not found or failed to execute."
