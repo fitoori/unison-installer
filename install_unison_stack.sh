@@ -2,7 +2,7 @@
 
 ###############################################################################
 #                            install_unison_stack.sh                          #
-#                                      v1.1.1                                 #
+#                                      v1.1.2                                 #
 ###############################################################################
 # Production-ready installer for:
 #   • VCS tools (git, hg, darcs)
@@ -177,8 +177,9 @@ fi
 # ──────────────────────────────────────────────────────────────────────────── #
 # 8. Build & install Unison from source
 # ──────────────────────────────────────────────────────────────────────────── #
-# Create temp dir as the real user so ownership is correct
-UNISON_BUILD_DIR=$(sudo -u "$REAL_USER" mktemp -d /tmp/unison-build-XXXXXX)
+# Create temp dir and ensure real user owns it
+UNISON_BUILD_DIR="$(mktemp -d /tmp/unison-build-XXXXXX)"
+chown "$REAL_USER":"$REAL_USER" "$UNISON_BUILD_DIR"
 cleanup() { rm -rf "$UNISON_BUILD_DIR"; }
 trap cleanup EXIT
 
@@ -190,7 +191,7 @@ else
 
   log "Building Unison (this may take a minute)…"
   sudo -u "$REAL_USER" bash -lc "
-    cd '$UNISON_BUILD_DIR' &&
+    cd '$UNISON_BUILD_DIR' &&          # user now owns this directory
     eval \$(opam env) &&
     make
   "
