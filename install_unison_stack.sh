@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
+
 ###############################################################################
-# install_unison_stack.sh – Production-ready installer for:
+#                            install_unison_stack.sh                          #
+#                                      v1.0                                   #
+###############################################################################
+# Production-ready installer for:
 #   • VCS tools (git, hg, darcs)
 #   • gcc, build-essential, curl, unzip, bubblewrap
 #   • OPAM (with a practical OCaml switch) + Unison (built from source)
@@ -8,7 +12,6 @@
 #
 # Target: Debian / Raspberry Pi OS
 # Fails fast: exits immediately on any error with a helpful message.
-###############################################################################
 
 set -Eeuo pipefail
 shopt -s inherit_errexit             # make ERR trap propagate into subshells
