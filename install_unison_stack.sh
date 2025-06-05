@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 ###############################################################################
 #                            install_unison_stack.sh                          #
-#                                    v1.2.0                                   #
+#                                    v1.2.1                                   #
 ###############################################################################
 # Production-ready installer for:
 #   • VCS tools (git, hg, darcs)
@@ -233,11 +233,14 @@ fi
 # 9. Final sanity check                                                       #
 # ──────────────────────────────────────────────────────────────────────────── #
 verify_unison() {
-  if unison --version >/dev/null 2>&1; then
-    local ver; ver=$(unison -version 2>&1 | head -n1)
+  if sudo -u "$REAL_USER" env PATH="/usr/local/bin:$PATH" \
+       unison -version >/dev/null 2>&1; then
+    local ver
+    ver=$(sudo -u "$REAL_USER" env PATH="/usr/local/bin:$PATH" \
+              unison -version 2>&1 | head -n1)
     log "✅ Installation successful – $ver"
   else
-    fatal "Unison binary not found or failed to execute."
+    fatal "Unison binary installed but not runnable from $REAL_USER’s environment."
   fi
 }
 verify_unison
