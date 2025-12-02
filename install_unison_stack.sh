@@ -66,7 +66,7 @@ swap_size_mib() {
   [[ $unit =~ [Gg] ]] && echo $(( n * 1024 )) || echo "$n"
 }
 
-[[ $(id -u) -eq 0 ]] || fatal "Run as root (with sudo)."
+[[ $(id -u) -eq 0 ]] || fatal "Run as root (with sudo) for a system-wide install. Without root, packages and binaries would be limited to your user and may fail to write to /usr/local."
 
 REAL_USER="${SUDO_USER:-$USER}"
 USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6) \
