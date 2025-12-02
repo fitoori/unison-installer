@@ -31,6 +31,9 @@ chmod +x install_unison_stack.sh
 # Run (must be root)
 sudo ./install_unison_stack.sh
 
+# Skip confirmation and accept defaults
+sudo ./install_unison_stack.sh -y
+
 Tip: add -x to the shebang for a verbose run: sudo bash -x ./install_unison_stack.sh.
 
 When it finishes, verify:
