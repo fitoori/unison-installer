@@ -35,6 +35,12 @@ Environment overrides:
 USAGE
 }
 
+# Allow --help/-h before any other processing (useful when not running as root).
+if [[ ${1:-} == "--help" || ${1:-} == "-h" ]]; then
+  usage
+  exit 0
+fi
+
 ASSUME_YES=false
 while getopts ':yh-:' opt; do
   case $opt in
