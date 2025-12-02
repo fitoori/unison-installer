@@ -14,6 +14,18 @@
 - Internet access for `apt` and GitHub clones.
 - Root privileges (`sudo`).
 
+⸻
+
+Prerequisites
+	•	Debian 10 (Buster) or newer / Raspberry Pi OS 32- or 64-bit.
+	•	Internet connection for apt and GitHub clone.
+	•	Root privileges (sudo). Running without sudo will only affect the current user and skip system-wide locations such as /usr/local/bin.
+
+⸻
+
+Quick Start
+
+# Get the script
 ## Quick start
 ```bash
 # Download the installer
@@ -24,6 +36,8 @@ chmod +x install_unison_stack.sh
 
 # Run (must be root)
 sudo ./install_unison_stack.sh
+
+Running without sudo will not install dependencies or Unison system-wide; tools would remain scoped to your user and may fail when writing to /usr/local. Use sudo to ensure a complete installation.
 
 # Skip confirmation and accept defaults
 sudo ./install_unison_stack.sh -y
