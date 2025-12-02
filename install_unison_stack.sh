@@ -21,6 +21,37 @@ log()   { printf '%s [INFO]  %s\n'  "$(date +'%F %T')" "$*"; }
 fatal() { printf '%s [FATAL] %s\n' "$(date +'%F %T')" "$*" >&2; exit 1; }
 trap 'rc=$?; fatal "cmd: \"$BASH_COMMAND\" | line: $LINENO | exit: $rc"' ERR
 
+usage() {
+  cat <<'USAGE'
+Usage: sudo ./install_unison_stack.sh [-y|--yes] [-h|--help]
+
+Options:
+  -y, --yes    Run with default parameters without prompting.
+  -h, --help   Show this help message.
+
+Environment overrides:
+  SWAP_SIZE     Size of swapfile (e.g. 1G).
+  MIN_RAM_MB    RAM threshold (MiB) below which swap is enabled.
+USAGE
+}
+
+ASSUME_YES=false
+while getopts ':yh-:' opt; do
+  case $opt in
+    y) ASSUME_YES=true ;;
+    h) usage; exit 0 ;;
+    -)
+      case $OPTARG in
+        yes) ASSUME_YES=true ;;
+        help) usage; exit 0 ;;
+        *) fatal "Unknown option --$OPTARG" ;;
+      esac ;;
+    \?) fatal "Unknown option '-$OPTARG'" ;;
+  esac
+done
+shift $((OPTIND - 1))
+[[ $# -eq 0 ]] || fatal "Unexpected arguments: $*"
+
 # ──────────────────────────────────────────────────────────────────────────── #
 # Configuration                                                               #
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -42,6 +73,24 @@ USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6) \
   || fatal "Cannot determine home directory for user '$REAL_USER'."
 log "Real user      : $REAL_USER"
 log "User home      : $USER_HOME"
+
+confirm_defaults() {
+  log "Parameters     : SWAP_SIZE=$SWAP_SIZE | MIN_RAM_MB=$MIN_RAM_MB"
+  if "$ASSUME_YES"; then
+    log "Assuming yes due to -y/--yes flag."
+    return
+  fi
+
+  if [[ ! -t 0 ]]; then
+    fatal "Cannot prompt without a TTY. Re-run with -y to accept defaults."
+  fi
+
+  printf 'Proceed with these parameters? [y/N]: '
+  local reply
+  read -r reply || fatal "No input received."
+  [[ $reply =~ ^[Yy]$ ]] || fatal "Aborted by user."
+}
+confirm_defaults
 
 # ──────────────────────────────────────────────────────────────────────────── #
 # 1. Detect total RAM                                                         #
