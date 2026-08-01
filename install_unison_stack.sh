@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 ###############################################################################
 #                            install_unison_stack.sh                          #
-#                                    v1.2.1                                   #
+#                                    v1.3.0                                   #
 ###############################################################################
 # Production-ready installer for:
 #   • VCS tools (git, hg, darcs)
@@ -30,8 +30,13 @@ Options:
   -h, --help   Show this help message.
 
 Environment overrides:
-  SWAP_SIZE     Size of swapfile (e.g. 1G).
-  MIN_RAM_MB    RAM threshold (MiB) below which swap is enabled.
+  SWAP_SIZE       Size of swapfile (e.g. 1G).
+  MIN_RAM_MB      RAM threshold (MiB) below which swap is enabled.
+  UNISON_VERSION  Git tag (or branch) of bcpierce00/unison to build
+                  (default: v2.54.0). Pin the SAME value on every host you
+                  intend to sync — Unison refuses to talk between peers whose
+                  versions differ, so building from a moving 'main' on
+                  different days silently breaks sync later.
 USAGE
 }
 
@@ -64,6 +69,11 @@ shift $((OPTIND - 1))
 MIN_RAM_MB=2048                   # swap threshold
 SWAP_FILE="/swapfile"
 SWAP_SIZE="2G"                    # accepts “NNM” or “NNG”
+# Pin the Unison release tag so every host builds an identical, interoperable
+# binary. Unison peers must share the same version; building from an unpinned
+# 'main' produces whatever HEAD is that day and breaks sync between hosts
+# provisioned on different days. Override with UNISON_VERSION=… to bump.
+UNISON_VERSION="${UNISON_VERSION:-v2.54.0}"
 
 swap_size_mib() {
   [[ "$SWAP_SIZE" =~ ^([0-9]+)([GgMm])$ ]] \
@@ -260,10 +270,14 @@ cleanup() { rm -rf "$UNISON_BUILD_DIR"; }
 trap cleanup EXIT
 
 if [[ -x /usr/local/bin/unison ]]; then
-  log "Unison already installed – skipping build."
+  installed_ver=$(/usr/local/bin/unison -version 2>/dev/null | head -n1 || true)
+  log "Unison already installed (${installed_ver:-unknown}) – skipping build."
+  log "NOTE: if that version differs from your sync peers, remove /usr/local/bin/unison and re-run to rebuild $UNISON_VERSION."
 else
-  log "Cloning Unison…"
-  sudo -u "$REAL_USER" git clone --depth=1 https://github.com/bcpierce00/unison.git "$UNISON_BUILD_DIR"
+  log "Cloning Unison $UNISON_VERSION…"
+  sudo -u "$REAL_USER" git clone --depth=1 --branch "$UNISON_VERSION" \
+    https://github.com/bcpierce00/unison.git "$UNISON_BUILD_DIR" \
+    || fatal "git clone of Unison tag '$UNISON_VERSION' failed — check that the tag exists at https://github.com/bcpierce00/unison/tags (override with UNISON_VERSION=…)."
 
   log "Building Unison…"
   sudo -u "$REAL_USER" bash -lc "
